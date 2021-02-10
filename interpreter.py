@@ -15,97 +15,92 @@ class Interpreter:
 
     def reset(self):
         self.cells = [c_ubyte(0) for _ in range(CELLS_AMOUNT)]
-        self.current_cell = 0
-        self.nesting = 0
+        self.cell_pointer = 0
+        self.inst_pointer = 0
         self.stack = []
+        self.bindings = {
+            '>': self.right,
+            '<': self.left,
+            '+': self.add,
+            '-': self.sub,
+            '.': self.print,
+            ',': self.input,
+            '[': self.begin_loop,
+            ']': self.end_loop,
+        }
 
     def right(self):
-        self.current_cell += 1
-        if self.current_cell > CELLS_AMOUNT - 1:
-            self.current_cell = 0
+        self.cell_pointer += 1
+        if self.cell_pointer > CELLS_AMOUNT - 1:
+            self.cell_pointer = 0
 
     def left(self):
-        self.current_cell -= 1
-        if self.current_cell < 0:
-            self.current_cell = CELLS_AMOUNT - 1
+        self.cell_pointer -= 1
+        if self.cell_pointer < 0:
+            self.cell_pointer = CELLS_AMOUNT - 1
 
     def add(self):
-        self.cells[self.current_cell].value += 1
+        self.cells[self.cell_pointer].value += 1
 
     def sub(self):
-        self.cells[self.current_cell].value -= 1
+        self.cells[self.cell_pointer].value -= 1
 
     def print(self):
-        print(chr(self.cells[self.current_cell].value), end='')
+        print(chr(self.cells[self.cell_pointer].value), end='')
 
     def input(self):
-        self.cells[self.current_cell].value = ord(input()[0])
+        self.cells[self.cell_pointer].value = ord(input()[0])
 
     def begin_loop(self):
-        self.stack.append(int(self.current_cell))
+        # end_loop_pos = self.stack[-1][1] if self.stack else None
+        # loop_borders = (self.inst_pointer, end_loop_pos)
+        # if self.cells[self.cell_pointer].value != 0:
+        #     # TODO: try not to use stack check
+        #     if loop_borders not in self.stack:
+        #         self.stack.append(loop_borders)  # loop initializing
+        # else:
+        #     if self.stack:
+        #         self.stack.pop()
+        #     self.inst_pointer = end_loop_pos
 
-    def while_not_zero(self, code):
-        '''
-        :param code: the code inside the loop
-        '''
-        if self.additional_info:
-            print(f'Loop start on {self.current_cell} cell')
-        print(self.stack)
-        checking_cell = self.stack.pop()
-        while self.cells[checking_cell].value != 0:
-            if self.additional_info:
-                print(' ' * (self.nesting+1), end='')
-                print(f'cell[{checking_cell}] == {self.cells[checking_cell].value} != 0')
-            self.run(code)
-        if self.additional_info:
-            print(f'cell[{checking_cell}] == {self.cells[checking_cell].value}')
-            print('End of loop - return back')
+        # FIXME: second nested loop is not created, cause we know end_loop_pos
+        #  (can reproduce via .\interpreter.py -f .\samples\nested_loops_test.bf -d)
+        end_loop_pos = self.stack[-1][1] if self.stack else None
+        loop_borders = (self.inst_pointer, end_loop_pos)
+        # on first entry of loop we dont know where is end of it
+        if not end_loop_pos:
+            self.stack.append(loop_borders)  # loop initializing
+        # self.stack.append(loop_borders)  # loop initializing
+        if self.cells[self.cell_pointer].value == 0:
+            self.stack.pop()
+            # self.inst_pointer = end_loop_pos + 1  # jumps incorrect
+            self.inst_pointer = end_loop_pos
+
+    def end_loop(self):
+        loop_borders = (self.stack.pop()[0], self.inst_pointer)
+        self.stack.append(loop_borders)
+        # jump to begin of loop (-1, cause in run() loop will be +1)
+        self.inst_pointer = self.stack[-1][0] - 1
 
     def minify(self, code):
         return ''.join(ch for ch in code if ch in r'><+-.,[]')
 
     def run(self, code):
-        if self.additional_info:
-            print(' ' * (self.nesting + 1), end='')
-            print(f'Executing: "{code}"')
-        exec_code = self.minify(code)
-        for i, ch in enumerate(exec_code):
-            if ch == '<':
-                # if not self.__is_run_restricted(): self.left()
-                self.left()
-            elif ch == '>':
-                # if not self.__is_run_restricted(): self.right()
-                self.right()
-            elif ch == '+':
-                # if not self.__is_run_restricted(): self.add()
-                self.add()
-            elif ch == '-':
-                # if not self.__is_run_restricted(): self.sub()
-                self.sub()
-            elif ch == '.':
-                # if not self.__is_run_restricted(): self.print()
-                self.print()
-            elif ch == ',':
-                # if not self.__is_run_restricted(): self.input()
-                self.input()
-            elif ch == '[':
-                self.nesting += 1
-                code_block = ''
-                block_start = i
-                for j, loopch in enumerate(exec_code[block_start+1:]):
-                    # import pdb; pdb.set_trace()
-                    code_block += loopch
-                    if loopch == ']':
-                        self.nesting -= 1
-                    elif loopch == '[':
-                        self.nesting += 1
-                    if self.nesting == 0:
-                        # FIXME: find a way to drop last ']' more accurately
-                        code_block = code_block[:-1]
-                        break
-            elif ch == ']':
-                # if not self.__is_run_restricted(): self.while_not_zero(code_block)
-                self.while_not_zero(code_block)
+        minified_code = self.minify(code)
+        while self.inst_pointer < len(minified_code):
+            if self.additional_info:
+                print(f'inst_pointer: {self.inst_pointer}')
+                print(f'cell_pointer: {self.cell_pointer}')
+                print(f'value: {self.cells[self.cell_pointer].value}')
+                print(f'operator: {minified_code[self.inst_pointer]}')
+                print(f'callable_fn: {self.bindings[minified_code[self.inst_pointer]].__name__}()')
+                print(f'stack: {self.stack}')
+                print('----------------------------------------------')
+            # if self.inst_pointer == 108:
+            #     import pdb
+            #     pdb.set_trace()
+            self.bindings[minified_code[self.inst_pointer]]()
+            self.inst_pointer += 1
 
     def run_shell(self):
         print('Shell mode')
@@ -116,7 +111,7 @@ class Interpreter:
 
     def print_cells(self, wide=4):
         print('Cell '.rjust(8), end='')
-        for num, _ in enumerate(self.cells, self.current_cell-wide):
+        for num, _ in enumerate(self.cells, self.cell_pointer - wide):
             if num < 0:
                 corrected_num = CELLS_AMOUNT + num
             elif num >= CELLS_AMOUNT:
@@ -124,7 +119,7 @@ class Interpreter:
             else:
                 corrected_num = num
             print(f'| {str(corrected_num).rjust(6)}', end='')
-            if num == self.current_cell+wide:
+            if num == self.cell_pointer+wide:
                 break
         print('\n' + '-' * 8 * (2 * (wide + 1)) + '-')
         print('Value '.rjust(8), end='')
@@ -133,8 +128,8 @@ class Interpreter:
         #     if num == self.current_cell+wide:
         #         break
         # NOTE: i love enumerate, but commented loop is broken =(
-        num = self.current_cell - wide - 1
-        while num != self.current_cell+wide:
+        num = self.cell_pointer - wide - 1
+        while num != self.cell_pointer+wide:
             num += 1
             if num < 0:
                 num += CELLS_AMOUNT
@@ -143,9 +138,6 @@ class Interpreter:
             print(f'| {str(self.cells[num].value).rjust(6)}', end='')
 
         print('\n' + ' ' * int(8 * (2 * (wide + 1)) / 2) + '     ^')
-
-    def __is_run_restricted(self):
-        return self.nesting != 0
 
 
 if __name__ == '__main__':
@@ -164,8 +156,8 @@ if __name__ == '__main__':
 
     if args.source_file:
         with open(pathlib.Path(args.source_file), 'r') as f:
-            source_code = f.read()
-            interp.run(source_code)
+            code = f.read()
+            interp.run(code)
     else:
         try:
             interp.run_shell()
