@@ -18,6 +18,8 @@ class Interpreter:
         self.cell_pointer = 0
         self.inst_pointer = 0
         self.stack = []
+        self.exec_allowed = 0  # to workaround case, if we try to begin loop in cell with zero value
+                               # (sure, there is more beautiful way to resolve it, but idk it)
         self.bindings = {
             '>': self.right,
             '<': self.left,
@@ -30,76 +32,72 @@ class Interpreter:
         }
 
     def right(self):
-        self.cell_pointer += 1
-        if self.cell_pointer > CELLS_AMOUNT - 1:
-            self.cell_pointer = 0
+        if self.__allow_run__():
+            self.cell_pointer += 1
+            if self.cell_pointer > CELLS_AMOUNT - 1:
+                self.cell_pointer = 0
 
     def left(self):
-        self.cell_pointer -= 1
-        if self.cell_pointer < 0:
-            self.cell_pointer = CELLS_AMOUNT - 1
+        if self.__allow_run__():
+            self.cell_pointer -= 1
+            if self.cell_pointer < 0:
+                self.cell_pointer = CELLS_AMOUNT - 1
 
     def add(self):
-        self.cells[self.cell_pointer].value += 1
+        if self.__allow_run__():
+            self.cells[self.cell_pointer].value += 1
 
     def sub(self):
-        self.cells[self.cell_pointer].value -= 1
+        if self.__allow_run__():
+            self.cells[self.cell_pointer].value -= 1
 
     def print(self):
-        print(chr(self.cells[self.cell_pointer].value), end='')
+        if self.__allow_run__():
+            print(chr(self.cells[self.cell_pointer].value), end='')
 
     def input(self):
-        self.cells[self.cell_pointer].value = ord(input()[0])
+        if self.__allow_run__():
+            self.cells[self.cell_pointer].value = ord(input('(input): ')[0])
 
     def begin_loop(self):
-        # end_loop_pos = self.stack[-1][1] if self.stack else None
-        # loop_borders = (self.inst_pointer, end_loop_pos)
+        # write to stack position of loop begin
+        # however interpreter checks if curr cell is not zero in end of loop
+        # it should be checked here also. Otherwise, it would be do/while loop
         # if self.cells[self.cell_pointer].value != 0:
-        #     # TODO: try not to use stack check
-        #     if loop_borders not in self.stack:
-        #         self.stack.append(loop_borders)  # loop initializing
-        # else:
-        #     if self.stack:
-        #         self.stack.pop()
-        #     self.inst_pointer = end_loop_pos
-
-        # FIXME: second nested loop is not created, cause we know end_loop_pos
-        #  (can reproduce via .\interpreter.py -f .\samples\nested_loops_test.bf -d)
-        end_loop_pos = self.stack[-1][1] if self.stack else None
-        loop_borders = (self.inst_pointer, end_loop_pos)
-        # on first entry of loop we dont know where is end of it
-        if not end_loop_pos:
-            self.stack.append(loop_borders)  # loop initializing
-        # self.stack.append(loop_borders)  # loop initializing
+        #     self.stack.append(self.inst_pointer)
+        self.stack.append(self.inst_pointer)
         if self.cells[self.cell_pointer].value == 0:
-            self.stack.pop()
-            # self.inst_pointer = end_loop_pos + 1  # jumps incorrect
-            self.inst_pointer = end_loop_pos
+            self.exec_allowed += 1
 
     def end_loop(self):
-        loop_borders = (self.stack.pop()[0], self.inst_pointer)
-        self.stack.append(loop_borders)
-        # jump to begin of loop (-1, cause in run() loop will be +1)
-        self.inst_pointer = self.stack[-1][0] - 1
+        # loop exit
+        if self.cells[self.cell_pointer].value == 0:
+            self.stack.pop()
+            if not self.__allow_run__():
+                self.exec_allowed -= 1
+        else:
+            self.inst_pointer = self.stack[-1] if self.stack else self.inst_pointer
 
     def minify(self, code):
         return ''.join(ch for ch in code if ch in r'><+-.,[]')
 
     def run(self, code):
         minified_code = self.minify(code)
+        iter = 0
         while self.inst_pointer < len(minified_code):
             if self.additional_info:
+                print(f'iteration: {iter}')
                 print(f'inst_pointer: {self.inst_pointer}')
                 print(f'cell_pointer: {self.cell_pointer}')
                 print(f'value: {self.cells[self.cell_pointer].value}')
-                print(f'operator: {minified_code[self.inst_pointer]}')
+                print(f'operator: {minified_code[self.inst_pointer]}', end='')
+                print(' (skip)' if not self.__allow_run__() else '')
+                print(f'exec_allowed: {self.exec_allowed}')
                 print(f'callable_fn: {self.bindings[minified_code[self.inst_pointer]].__name__}()')
                 print(f'stack: {self.stack}')
                 print('----------------------------------------------')
-            # if self.inst_pointer == 108:
-            #     import pdb
-            #     pdb.set_trace()
             self.bindings[minified_code[self.inst_pointer]]()
+            iter += 1
             self.inst_pointer += 1
 
     def run_shell(self):
@@ -138,6 +136,9 @@ class Interpreter:
             print(f'| {str(self.cells[num].value).rjust(6)}', end='')
 
         print('\n' + ' ' * int(8 * (2 * (wide + 1)) / 2) + '     ^')
+
+    def __allow_run__(self):
+        return self.exec_allowed == 0
 
 
 if __name__ == '__main__':
